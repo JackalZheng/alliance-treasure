@@ -40,6 +40,7 @@ canvas{max-width:100%}
  </div>
  <details class="panel"><summary class="font-bold cursor-pointer">⚙️ 校正與標記（第一次使用請做）</summary>
   <p class="text-xs my-1">1. 調整格線位置（比例），使格線對齊盤面。2. 選代號後點樣本圖上的格子加入「原型」，每種圖案標幾格（含各種部位），空白格可自動判斷。截圖中的南瓜格可標成 ?。</p>
+  <div class="text-xs mb-1">圖片尺寸群組：<select id="sizeSel" class="text-black"></select> <button class="btn2" id="calFile">用原圖檢查格線</button> <span class="text-gray-300">（改校正後需清除並重新匯入該尺寸的圖）</span></div>
   <div class="grid grid-cols-2 gap-1 text-xs">
    <label>左 <input id="cx0" type="number" step="0.001" class="text-black w-20"></label>
    <label>右 <input id="cx1" type="number" step="0.001" class="text-black w-20"></label>
@@ -76,7 +77,10 @@ const CODES=[['?','❔','未翻開'],['E','⬛','空白'],['A','🔱','箭矢'],
 const ICON=Object.fromEntries(CODES.map(c=>[c[0],c[1]]));
 const COLS=10,ROWS=12;
 const DEF={x0:0.0507,x1:0.9516,y0:0.2810,y1:0.7805};
-let cal=JSON.parse(localStorage.getItem('cal')||'null')||{...DEF};
+let calMap=JSON.parse(localStorage.getItem('calMap')||'null')||{};{const o=JSON.parse(localStorage.getItem('cal')||'null');if(o&&!calMap['868x1886'])calMap['868x1886']=o}
+let calSize='868x1886';let cal=calMap[calSize]||{...DEF};
+function calFor(W,H){return calMap[W+'x'+H]||calMap['*']||DEF}
+function saveCal(){calMap[calSize]={...cal};localStorage.setItem('calMap',JSON.stringify(calMap))}
 let protos=JSON.parse(localStorage.getItem('protos')||'[]'); // {c,f}
 let images=[]; // {id,name,thumb,feats:Float32Array[120*FD] as array}
 let board=JSON.parse(localStorage.getItem('board')||'null')||Array(120).fill('?');
@@ -88,24 +92,34 @@ function tx(m){return db.transaction('img',m).objectStore('img')}
 function dbAll(){return new Promise(r=>{const q=tx('readonly').getAll();q.onsuccess=()=>r(q.result)})}
 function dbPut(o){return new Promise(r=>{const q=tx('readwrite').put(o);q.onsuccess=r;q.onerror=r})}
 // ---------- features
-const FEATURE_VERSION=2,BG_TH=48,FG_MIN=0.06;
-// features computed on a board crop canvas (normalized 400px-wide preview)
-function bgColor(d){const h={};for(let i=0;i<d.length;i+=16){const k=(d[i]>>3)+','+(d[i+1]>>3)+','+(d[i+2]>>3);h[k]=(h[k]||0)+1}
-  let best=null,m=0;for(const k in h)if(h[k]>m){m=h[k];best=k}const [r,g,b]=best.split(',').map(v=>v*8+4);
-  // sanity: purple-ish expected; fall back to default panel color
-  return (b>r&&b>g)?[r,g,b]:[57,23,118]}
-function isBg(r,g,b,bg){const dr=r-bg[0],dg=g-bg[1],db=b-bg[2];if(dr*dr+dg*dg+db*db<BG_TH*BG_TH)return true;
-  // also treat dark/mid purple (hue 250-290, low brightness) as background
-  const mx=Math.max(r,g,b),mn=Math.min(r,g,b);if(mx<140&&b===mx&&b>r&&r>g&&(mx-mn)<110)return true;return false}
+const FEATURE_VERSION=3,FG_MIN=0.06;
+// theme-agnostic background: dominant coarse colour bins of the board crop (covers checkerboard shades + grid lines)
+function bgColor(d){const h=new Map();let tot=0;
+  for(let i=0;i<d.length;i+=8){const k=(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4);let e=h.get(k);if(!e){e=[0,0,0,0];h.set(k,e)}e[0]++;e[1]+=d[i];e[2]+=d[i+1];e[3]+=d[i+2];tot++}
+  const top=[...h.values()].sort((a,b)=>b[0]-a[0]);const cs=[];
+  for(const e of top.slice(0,6)){if(e[0]<tot*0.03)break;const c=[e[1]/e[0],e[2]/e[0],e[3]/e[0]];
+    if(!cs.some(o=>cd2(o,c)<24*24))cs.push(c);if(cs.length>=3)break}
+  if(!cs.length)cs.push([57,23,118]);return cs}
+function cd2(a,b){const x=a[0]-b[0],y=a[1]-b[1],z=a[2]-b[2];return x*x+y*y+z*z}
+function bgThr(c){const mx=Math.max(...c),mn=Math.min(...c);// brown/orange theme -> tighter (chest & bow wood are brown)
+  return (c[0]>=c[1]&&c[1]>=c[2]&&mx-mn>40)?26:40}
+// local shades from a cell's border ring (only pixels already near a global centre)
+function localCenters(d,W,x0,y0,x1,y1,cs){const acc=cs.map(()=>[0,0,0,0]);
+  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){if(y>y0+2&&y<y1-3&&x>x0+2&&x<x1-3)continue;const i=(y*W+x)*4,p=[d[i],d[i+1],d[i+2]];
+    cs.forEach((c,j)=>{if(cd2(p,c)<(bgThr(c)*1.3)**2){acc[j][0]++;acc[j][1]+=p[0];acc[j][2]+=p[1];acc[j][3]+=p[2]}})}
+  return cs.map((c,j)=>acc[j][0]>8?[acc[j][1]/acc[j][0],acc[j][2]/acc[j][0],acc[j][3]/acc[j][0]]:c)}
+function flatAt(d,W,H,x,y){const i=(y*W+x)*4,j=(y*W+Math.min(W-1,x+2))*4,k=(Math.min(H-1,y+2)*W+x)*4;
+  return Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2])+Math.abs(d[i]-d[k])+Math.abs(d[i+1]-d[k+1])+Math.abs(d[i+2]-d[k+2])<60}
+function isBg(r,g,b,cs){for(const c of cs){const t=bgThr(c);if(cd2([r,g,b],c)<t*t)return true}return false}
 function hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
   if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;if(h<0)h+=360}return [h,mx?d/mx:0,mx]}
 function boardFeatures(cv){const W=cv.width,H=cv.height,d=cv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,W,H).data;
-  const bg=bgColor(d),cw=W/COLS,ch=H/ROWS,out=[];
+  const gc=bgColor(d),cw=W/COLS,ch=H/ROWS,out=[];
   for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const x0=Math.round(k*cw+cw*.1),x1=Math.round((k+1)*cw-cw*.1),y0=Math.round(r*ch+ch*.1),y1=Math.round((r+1)*ch-ch*.1);
-    let n=0,fg=0,s=[0,0,0],s2=[0,0,0];const hh=new Array(12).fill(0),vh=new Array(6).fill(0),sh=new Array(16).fill(0),shn=new Array(16).fill(0);
+    const lc=localCenters(d,W,Math.round(k*cw),Math.round(r*ch),Math.round((k+1)*cw),Math.round((r+1)*ch),gc),bg=[...lc,...gc];let n=0,fg=0,s=[0,0,0],s2=[0,0,0];const hh=new Array(12).fill(0),vh=new Array(6).fill(0),sh=new Array(16).fill(0),shn=new Array(16).fill(0);
     for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=(y*W+x)*4,R=d[i],G=d[i+1],B=d[i+2];n++;
       const q=Math.min(3,Math.floor((y-y0)/(y1-y0)*4))*4+Math.min(3,Math.floor((x-x0)/(x1-x0)*4));shn[q]++;
-      if(isBg(R,G,B,bg))continue;fg++;sh[q]++;s[0]+=R;s[1]+=G;s[2]+=B;s2[0]+=R*R;s2[1]+=G*G;s2[2]+=B*B;
+      if(isBg(R,G,B,bg)&&flatAt(d,W,H,x,y))continue;fg++;sh[q]++;s[0]+=R;s[1]+=G;s[2]+=B;s2[0]+=R*R;s2[1]+=G*G;s2[2]+=B*B;
       const [h,sat,v]=hsv(R,G,B);if(sat<0.18)hh[11]++;else hh[Math.min(10,Math.floor(h/360*11))]++;vh[Math.min(5,Math.floor(v*6))]++}
     const f={ratio:fg/n,mean:[0,0,0],std:[0,0,0],hue:hh,val:vh,shape:sh.map((v,i)=>v/(shn[i]||1))};
     if(fg){for(let c=0;c<3;c++){const m=s[c]/fg;f.mean[c]=m/255;f.std[c]=Math.sqrt(Math.max(0,s2[c]/fg-m*m))/255}
@@ -125,12 +139,12 @@ function reclassAll(){for(const im of images)im.codes=im.feats.map(classify);fil
 // ---------- import
 function loadImg(file){return new Promise((r,j)=>{const u=URL.createObjectURL(file),i=new Image();i.onload=()=>{r(i);URL.revokeObjectURL(u)};i.onerror=j;i.src=u})}
 function imgCtx(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0);return x}
-function cropCanvas(ctx,W,H,w){const c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d',{willReadFrequently:true}).drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c}
-function makeThumb(ctx,W,H,w){const c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d').drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.7)}
+function cropCanvas(ctx,W,H,w){const cal=calFor(W,H),c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d',{willReadFrequently:true}).drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c}
+function makeThumb(ctx,W,H,w){const cal=calFor(W,H),c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d').drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.7)}
 async function importFiles(list){const fs=[...list].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp)$/i.test(f.name));
   let n=0;for(const f of fs){const id=f.name+'_'+f.size;if(images.find(x=>x.id===id)){n++;continue}
     try{const img=await loadImg(f);const ctx=imgCtx(img),W=img.naturalWidth,H=img.naturalHeight;
-      const o={id,name:f.name,thumb:makeThumb(ctx,W,H,120),big:makeThumb(ctx,W,H,400),fv:FEATURE_VERSION,feats:boardFeatures(cropCanvas(ctx,W,H,400))};
+      if(!sizes.has(W+'x'+H)){sizes.add(W+'x'+H);fillSizes()}const o={id,name:f.name,size:W+'x'+H,thumb:makeThumb(ctx,W,H,120),big:makeThumb(ctx,W,H,400),fv:FEATURE_VERSION,feats:boardFeatures(cropCanvas(ctx,W,H,400))};
       await dbPut(o);o.codes=o.feats.map(classify);images.push(o)}catch(e){console.warn(e)}
     n++;$('bar').style.width=(n/fs.length*100)+'%';$('status').textContent=`處理中 ${n}/${fs.length}`;
     if(n%5===0)await new Promise(r=>setTimeout(r,0))}
@@ -165,7 +179,7 @@ function preview(im){const c=$('pv'),x=c.getContext('2d'),i=new Image();i.onload
   board.forEach((b,k)=>{if(b==='?')return;const ok=im.codes[k]===b;x.strokeStyle=ok?'#22c55e':'#ef4444';x.strokeRect(k%COLS*cw+2,Math.floor(k/COLS)*ch+2,cw-4,ch-4)});x.globalAlpha=1};i.src=im.big;
   $('pvName').textContent=im.name;$('pvGrid').innerHTML=im.codes.map((c,k)=>`<div class="cell" style="font-size:11px;${board[k]!=='?'?(board[k]===c?'outline:2px solid #22c55e':'outline:2px solid #ef4444'):''}">${ICON[c]}</div>`).join('')}
 // ---------- calibration
-['x0','x1','y0','y1'].forEach(k=>{const el=$('c'+k);el.value=cal[k];el.oninput=()=>{cal[k]=+el.value;localStorage.setItem('cal',JSON.stringify(cal));drawCalib()}});
+['x0','x1','y0','y1'].forEach(k=>{const el=$('c'+k);el.value=cal[k];el.oninput=()=>{cal[k]=+el.value;saveCal();drawCalib()}});
 $('labCodes').innerHTML=CODES.map(c=>`<button class="btn2" data-c="${c[0]}">${c[1]}${c[2]}</button>`).join('');
 $('labCodes').onclick=e=>{const c=e.target.closest('button')?.dataset.c;if(c){labCode=c;markLab()}};
 function markLab(){[...$('labCodes').children].forEach(b=>b.style.background=b.dataset.c===labCode?'#7c3aed':'')}
@@ -179,7 +193,10 @@ async function drawCalib(){const c=$('calib'),x=c.getContext('2d');const id=$('s
   let src=sampleCtx?sampleCtx.canvas:null;
   if(id){const im=images.find(z=>z.id===id);const i=new Image();await new Promise(r=>{i.onload=r;i.src=im.big});
     c.width=i.width;c.height=i.height;x.drawImage(i,0,0);c._mode='crop';c._im=im;
-    if($('showMask').checked){const id2=x.getImageData(0,0,c.width,c.height),d=id2.data,bg=bgColor(d);for(let p=0;p<d.length;p+=4)if(isBg(d[p],d[p+1],d[p+2],bg)){d[p]=0;d[p+1]=255;d[p+2]=255}x.putImageData(id2,0,0)}}
+    if($('showMask').checked){const id2=x.getImageData(0,0,c.width,c.height),d=id2.data,W=c.width,H=c.height,gc=bgColor(d),cw=W/COLS,ch=H/ROWS,m=new Uint8Array(W*H);
+      for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const X0=Math.round(k*cw),Y0=Math.round(r*ch),X1=Math.round((k+1)*cw),Y1=Math.round((r+1)*ch),bg=[...localCenters(d,W,X0,Y0,X1,Y1,gc),...gc];
+        for(let y=Y0;y<Y1;y++)for(let xx=X0;xx<X1;xx++){const p=(y*W+xx)*4;if(isBg(d[p],d[p+1],d[p+2],bg)&&flatAt(d,W,H,xx,y))m[y*W+xx]=1}}
+      for(let q=0;q<m.length;q++)if(m[q]){d[q*4]=0;d[q*4+1]=255;d[q*4+2]=255}x.putImageData(id2,0,0)}}
   else if(src){c.width=400;c.height=src.height*400/src.width;x.drawImage(src,0,0,c.width,c.height);c._mode='full'}
   else{c.width=0;return}
   x.strokeStyle='#0f0';x.lineWidth=1;let X0=0,Y0=0,X1=c.width,Y1=c.height;
@@ -195,10 +212,16 @@ $('resetP').onclick=()=>{if(confirm('清除所有原型？')){protos=[];saveProt
 function saveProtos(){localStorage.setItem('protos',JSON.stringify(protos));const cnt={};protos.forEach(p=>cnt[p.c]=(cnt[p.c]||0)+1);
   $('protoInfo').textContent='原型數：'+(CODES.map(c=>cnt[c[0]]?`${c[1]}${cnt[c[0]]}`:'').filter(Boolean).join(' ')||'0');reclassAll();drawCalib()}
 function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj)],{type:'application/json'}));a.download=name;a.click()}
-$('expP').onclick=()=>dl('treasure-protos.json',{cal,protos});
+$('expP').onclick=()=>dl('treasure-protos.json',{cal,calMap,protos});
 $('expG').onclick=()=>dl('treasure-grids.json',images.map(im=>({name:im.name,grid:im.codes.join('')})));
-$('impP').onchange=async e=>{const o=JSON.parse(await e.target.files[0].text());if(o.cal){cal=o.cal;localStorage.setItem('cal',JSON.stringify(cal));['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k])}
+$('impP').onchange=async e=>{const o=JSON.parse(await e.target.files[0].text());if(o.calMap){calMap=o.calMap;localStorage.setItem('calMap',JSON.stringify(calMap))}if(o.cal){cal=o.cal;saveCal();['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k])}
   if(o.protos)protos=o.protos;saveProtos();alert('已匯入。若校正值改變，請清除圖庫後重新匯入。')};
+const sizes=new Set(['868x1886']);
+function fillSizes(){images.forEach(im=>im.size&&sizes.add(im.size));Object.keys(calMap).forEach(k=>sizes.add(k));
+  $('sizeSel').innerHTML=[...sizes].map(z=>`<option ${z===calSize?'selected':''}>${z}</option>`).join('')}
+$('sizeSel').onchange=()=>{calSize=$('sizeSel').value;cal={...(calMap[calSize]||DEF)};['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k]);drawCalib()};
+$('calFile').onclick=()=>{pick.onchange=async()=>{const f=pick.files[0];if(!f)return;const img=await loadImg(f);sampleCtx=imgCtx(img);
+  calSize=img.naturalWidth+'x'+img.naturalHeight;sizes.add(calSize);cal={...calFor(img.naturalWidth,img.naturalHeight)};saveCal();fillSizes();['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k]);$('sampleSel').value='';drawCalib()};pick.click()};
 // ---------- migrate old features
 function loadUrl(u){return new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=u})}
 async function migrate(){const old=images.filter(im=>im.fv!==FEATURE_VERSION);let n=0;
@@ -208,5 +231,5 @@ async function migrate(){const old=images.filter(im=>im.fv!==FEATURE_VERSION);le
   let lost=0;protos=protos.map(p=>{if(p.fv===FEATURE_VERSION)return p;const im=images.find(x=>x.id===p.src);if(!im){lost++;return null}return {...p,f:im.feats[p.i],fv:FEATURE_VERSION}}).filter(Boolean);
   localStorage.setItem('protos',JSON.stringify(protos));if(lost)alert(`有 ${lost} 個原型找不到來源圖，已移除，請重新標記。`)}
 // ---------- init
-(async()=>{markLab();renderBoard();await openDb();images=await dbAll();await migrate();reclassAll();fillSamples();saveProtos();$('status').textContent=`圖庫共 ${images.length} 張`})();
+(async()=>{markLab();renderBoard();await openDb();images=await dbAll();fillSizes();await migrate();reclassAll();fillSamples();saveProtos();$('status').textContent=`圖庫共 ${images.length} 張`})();
 </script></body></html>
