@@ -47,7 +47,7 @@ canvas{max-width:100%}
    <label>下 <input id="cy1" type="number" step="0.001" class="text-black w-20"></label>
   </div>
   <div class="flex flex-wrap gap-1 my-2 text-sm" id="labCodes"></div>
-  <div class="text-xs mb-1">樣本圖：<select id="sampleSel" class="text-black max-w-[60%]"></select> <button class="btn2" id="undoProto">復原上一個</button></div>
+  <div class="text-xs mb-1">樣本圖：<select id="sampleSel" class="text-black max-w-[60%]"></select> <button class="btn2" id="undoProto">復原上一個</button> <label><input type="checkbox" id="showMask"> 顯示底色遮罩</label></div>
   <canvas id="calib"></canvas>
   <div id="protoInfo" class="text-xs my-1"></div>
   <div class="flex flex-wrap gap-2 text-sm">
@@ -74,7 +74,7 @@ canvas{max-width:100%}
 <script>
 const CODES=[['?','❔','未翻開'],['E','⬛','空白'],['A','🔱','箭矢'],['K','🗝️','鑰匙'],['C','🧰','寶箱'],['W','👑','皇冠'],['G','🎲','齒輪骰子'],['H','⚓','錨'],['B','🏹','弓']];
 const ICON=Object.fromEntries(CODES.map(c=>[c[0],c[1]]));
-const COLS=10,ROWS=12,FS=6,FD=FS*FS*3+6;
+const COLS=10,ROWS=12;
 const DEF={x0:0.0507,x1:0.9516,y0:0.2810,y1:0.7805};
 let cal=JSON.parse(localStorage.getItem('cal')||'null')||{...DEF};
 let protos=JSON.parse(localStorage.getItem('protos')||'[]'); // {c,f}
@@ -88,34 +88,49 @@ function tx(m){return db.transaction('img',m).objectStore('img')}
 function dbAll(){return new Promise(r=>{const q=tx('readonly').getAll();q.onsuccess=()=>r(q.result)})}
 function dbPut(o){return new Promise(r=>{const q=tx('readwrite').put(o);q.onsuccess=r;q.onerror=r})}
 // ---------- features
-function cellFeatures(ctx,W,H,c){ // ctx holds full image
-  const out=[];const bx=c.x0*W,by=c.y0*H,cw=(c.x1-c.x0)*W/COLS,ch=(c.y1-c.y0)*H/ROWS;
-  const N=FS*4;const tc=document.createElement('canvas');tc.width=N*COLS;tc.height=N*ROWS;const t=tc.getContext('2d',{willReadFrequently:true});
-  for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){t.drawImage(ctx.canvas,bx+k*cw+cw*.1,by+r*ch+ch*.1,cw*.8,ch*.8,k*N,r*N,N,N)}
-  const d=t.getImageData(0,0,N*COLS,N*ROWS).data,w=N*COLS;
-  for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const f=new Array(FD).fill(0);let s=[0,0,0],s2=[0,0,0];
-    for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=((r*N+y)*w+k*N+x)*4,b=(Math.floor(y/4)*FS+Math.floor(x/4))*3;
-      for(let ch=0;ch<3;ch++){const v=d[i+ch]/255;f[b+ch]+=v/16;s[ch]+=v;s2[ch]+=v*v}}
-    const n=N*N;for(let ch=0;ch<3;ch++){const m=s[ch]/n;f[FS*FS*3+ch]=m;f[FS*FS*3+3+ch]=Math.sqrt(Math.max(0,s2[ch]/n-m*m))*2}
-    out.push(f.map(v=>Math.round(v*1000)/1000))}
+const FEATURE_VERSION=2,BG_TH=48,FG_MIN=0.06;
+// features computed on a board crop canvas (normalized 400px-wide preview)
+function bgColor(d){const h={};for(let i=0;i<d.length;i+=16){const k=(d[i]>>3)+','+(d[i+1]>>3)+','+(d[i+2]>>3);h[k]=(h[k]||0)+1}
+  let best=null,m=0;for(const k in h)if(h[k]>m){m=h[k];best=k}const [r,g,b]=best.split(',').map(v=>v*8+4);
+  // sanity: purple-ish expected; fall back to default panel color
+  return (b>r&&b>g)?[r,g,b]:[57,23,118]}
+function isBg(r,g,b,bg){const dr=r-bg[0],dg=g-bg[1],db=b-bg[2];if(dr*dr+dg*dg+db*db<BG_TH*BG_TH)return true;
+  // also treat dark/mid purple (hue 250-290, low brightness) as background
+  const mx=Math.max(r,g,b),mn=Math.min(r,g,b);if(mx<140&&b===mx&&b>r&&r>g&&(mx-mn)<110)return true;return false}
+function hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
+  if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;if(h<0)h+=360}return [h,mx?d/mx:0,mx]}
+function boardFeatures(cv){const W=cv.width,H=cv.height,d=cv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,W,H).data;
+  const bg=bgColor(d),cw=W/COLS,ch=H/ROWS,out=[];
+  for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const x0=Math.round(k*cw+cw*.1),x1=Math.round((k+1)*cw-cw*.1),y0=Math.round(r*ch+ch*.1),y1=Math.round((r+1)*ch-ch*.1);
+    let n=0,fg=0,s=[0,0,0],s2=[0,0,0];const hh=new Array(12).fill(0),vh=new Array(6).fill(0),sh=new Array(16).fill(0),shn=new Array(16).fill(0);
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=(y*W+x)*4,R=d[i],G=d[i+1],B=d[i+2];n++;
+      const q=Math.min(3,Math.floor((y-y0)/(y1-y0)*4))*4+Math.min(3,Math.floor((x-x0)/(x1-x0)*4));shn[q]++;
+      if(isBg(R,G,B,bg))continue;fg++;sh[q]++;s[0]+=R;s[1]+=G;s[2]+=B;s2[0]+=R*R;s2[1]+=G*G;s2[2]+=B*B;
+      const [h,sat,v]=hsv(R,G,B);if(sat<0.18)hh[11]++;else hh[Math.min(10,Math.floor(h/360*11))]++;vh[Math.min(5,Math.floor(v*6))]++}
+    const f={ratio:fg/n,mean:[0,0,0],std:[0,0,0],hue:hh,val:vh,shape:sh.map((v,i)=>v/(shn[i]||1))};
+    if(fg){for(let c=0;c<3;c++){const m=s[c]/fg;f.mean[c]=m/255;f.std[c]=Math.sqrt(Math.max(0,s2[c]/fg-m*m))/255}
+      f.hue=hh.map(v=>v/fg);f.val=vh.map(v=>v/fg)}
+    out.push([f.ratio,...f.mean,...f.std,...f.hue,...f.val,...f.shape].map(v=>Math.round(v*1000)/1000))}
   return out}
-function heur(f){const o=FS*FS*3,[r,g,b]=[f[o],f[o+1],f[o+2]],sd=f[o+3]+f[o+4]+f[o+5];
-  if(sd<0.12&&b>r*1.5&&b>g*2.5&&b<0.6)return 'E';return null}
-function dist(a,b){let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=d*d}return s}
+// vector layout: 0 ratio |1-3 mean |4-6 std |7-18 hue |19-24 val |25-40 shape
+const WTS=[2,...Array(3).fill(2),...Array(3).fill(1),...Array(12).fill(1.5),...Array(6).fill(1),...Array(16).fill(0.6)];
+function heur(f){return f[0]<FG_MIN?'E':null}
+function dist(a,b){let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=WTS[i]*d*d}return s}
 function classify(f){const h=heur(f);if(!protos.length)return h||'?';
   let best=[];for(const p of protos){const d=dist(f,p.f);best.push([d,p.c])}best.sort((a,b)=>a[0]-b[0]);
-  if(h&&!protos.some(p=>p.c==='E'))return 'E';
+  if(h)return 'E';
   const k=best.slice(0,3),v={};k.forEach(([d,c],i)=>v[c]=(v[c]||0)+1/(1+d)*(i?1:1.5));
   return Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0]}
 function reclassAll(){for(const im of images)im.codes=im.feats.map(classify);filter();if(sel)preview(sel)}
 // ---------- import
 function loadImg(file){return new Promise((r,j)=>{const u=URL.createObjectURL(file),i=new Image();i.onload=()=>{r(i);URL.revokeObjectURL(u)};i.onerror=j;i.src=u})}
 function imgCtx(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0);return x}
+function cropCanvas(ctx,W,H,w){const c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d',{willReadFrequently:true}).drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c}
 function makeThumb(ctx,W,H,w){const c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d').drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.7)}
 async function importFiles(list){const fs=[...list].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp)$/i.test(f.name));
   let n=0;for(const f of fs){const id=f.name+'_'+f.size;if(images.find(x=>x.id===id)){n++;continue}
     try{const img=await loadImg(f);const ctx=imgCtx(img),W=img.naturalWidth,H=img.naturalHeight;
-      const o={id,name:f.name,thumb:makeThumb(ctx,W,H,120),big:makeThumb(ctx,W,H,400),feats:cellFeatures(ctx,W,H,cal)};
+      const o={id,name:f.name,thumb:makeThumb(ctx,W,H,120),big:makeThumb(ctx,W,H,400),fv:FEATURE_VERSION,feats:boardFeatures(cropCanvas(ctx,W,H,400))};
       await dbPut(o);o.codes=o.feats.map(classify);images.push(o)}catch(e){console.warn(e)}
     n++;$('bar').style.width=(n/fs.length*100)+'%';$('status').textContent=`處理中 ${n}/${fs.length}`;
     if(n%5===0)await new Promise(r=>setTimeout(r,0))}
@@ -133,11 +148,11 @@ $('board').onclick=e=>{const el=e.target.closest('.bc');if(!el)return;popIdx=+el
 function saveBoard(){localStorage.setItem('board',JSON.stringify(board));renderBoard();filter();if(sel)preview(sel)}
 $('clearBoard').onclick=()=>{board=Array(120).fill('?');saveBoard()};
 $('cur').onchange=async e=>{const f=e.target.files[0];if(!f)return;const img=await loadImg(f),ctx=imgCtx(img);
-  const fe=cellFeatures(ctx,img.naturalWidth,img.naturalHeight,cal);
-  board=fe.map(f=>{const o=FS*FS*3,[r,g,b]=[f[o],f[o+1],f[o+2]],sd=f[o+3]+f[o+4]+f[o+5];
+  const fe=boardFeatures(cropCanvas(ctx,img.naturalWidth,img.naturalHeight,400));
+  board=fe.map(f=>{
     const c=classify(f);if(protos.some(p=>p.c==='?'))return c;
-    // 南瓜格：偏亮的淺紫色、有橘色南瓜
-    if(b>0.45&&r>0.35&&c!=='E')return '?';return c});
+    // 南瓜格：前景多（淺紫磚）且含橘色
+    if(f[0]>0.6&&(f[7]+f[8])>0.08)return '?';return c});
   saveBoard();e.target.value=''};
 // ---------- filter / preview
 function filter(){const known=board.map((c,i)=>[c,i]).filter(x=>x[0]!=='?');
@@ -157,13 +172,14 @@ function markLab(){[...$('labCodes').children].forEach(b=>b.style.background=b.d
 let sampleFile=null,sampleCtx=null;
 function fillSamples(){$('sampleSel').innerHTML='<option value="">（請先匯入圖片）</option>'+images.slice(0,600).map(im=>`<option value="${im.id}">${im.name}</option>`).join('')}
 // sample uses full-res original? we only store crops; let user pick original file for calibration
-$('sampleSel').onchange=()=>drawCalib();
+$('sampleSel').onchange=()=>drawCalib();$('showMask').onchange=()=>drawCalib();
 const pick=document.createElement('input');pick.type='file';pick.accept='image/*';
 async function drawCalib(){const c=$('calib'),x=c.getContext('2d');const id=$('sampleSel').value;
   if(sampleCtx&&!id){}
   let src=sampleCtx?sampleCtx.canvas:null;
   if(id){const im=images.find(z=>z.id===id);const i=new Image();await new Promise(r=>{i.onload=r;i.src=im.big});
-    c.width=i.width;c.height=i.height;x.drawImage(i,0,0);c._mode='crop';c._im=im;}
+    c.width=i.width;c.height=i.height;x.drawImage(i,0,0);c._mode='crop';c._im=im;
+    if($('showMask').checked){const id2=x.getImageData(0,0,c.width,c.height),d=id2.data,bg=bgColor(d);for(let p=0;p<d.length;p+=4)if(isBg(d[p],d[p+1],d[p+2],bg)){d[p]=0;d[p+1]=255;d[p+2]=255}x.putImageData(id2,0,0)}}
   else if(src){c.width=400;c.height=src.height*400/src.width;x.drawImage(src,0,0,c.width,c.height);c._mode='full'}
   else{c.width=0;return}
   x.strokeStyle='#0f0';x.lineWidth=1;let X0=0,Y0=0,X1=c.width,Y1=c.height;
@@ -173,7 +189,7 @@ async function drawCalib(){const c=$('calib'),x=c.getContext('2d');const id=$('s
   if(c._mode==='crop'){x.font='14px sans-serif';const cw=c.width/COLS,ch=c.height/ROWS;c._im.codes.forEach((cd,k)=>{x.fillStyle='rgba(0,0,0,.55)';x.fillRect(k%COLS*cw,Math.floor(k/COLS)*ch,16,16);x.fillStyle='#fff';x.fillText(cd,k%COLS*cw+3,Math.floor(k/COLS)*ch+13)})}}
 $('calib').onclick=e=>{const c=$('calib');if(c._mode!=='crop')return;const r=c.getBoundingClientRect();
   const k=Math.floor((e.clientX-r.left)/r.width*COLS),rr=Math.floor((e.clientY-r.top)/r.height*ROWS);const i=rr*COLS+k;
-  protos.push({c:labCode,f:c._im.feats[i],src:c._im.id,i});saveProtos()};
+  protos.push({c:labCode,f:c._im.feats[i],src:c._im.id,i,fv:FEATURE_VERSION});saveProtos()};
 $('undoProto').onclick=()=>{protos.pop();saveProtos()};
 $('resetP').onclick=()=>{if(confirm('清除所有原型？')){protos=[];saveProtos()}};
 function saveProtos(){localStorage.setItem('protos',JSON.stringify(protos));const cnt={};protos.forEach(p=>cnt[p.c]=(cnt[p.c]||0)+1);
@@ -183,6 +199,14 @@ $('expP').onclick=()=>dl('treasure-protos.json',{cal,protos});
 $('expG').onclick=()=>dl('treasure-grids.json',images.map(im=>({name:im.name,grid:im.codes.join('')})));
 $('impP').onchange=async e=>{const o=JSON.parse(await e.target.files[0].text());if(o.cal){cal=o.cal;localStorage.setItem('cal',JSON.stringify(cal));['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k])}
   if(o.protos)protos=o.protos;saveProtos();alert('已匯入。若校正值改變，請清除圖庫後重新匯入。')};
+// ---------- migrate old features
+function loadUrl(u){return new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=u})}
+async function migrate(){const old=images.filter(im=>im.fv!==FEATURE_VERSION);let n=0;
+  for(const im of old){try{const i=await loadUrl(im.big);const c=document.createElement('canvas');c.width=i.width;c.height=i.height;c.getContext('2d').drawImage(i,0,0);
+      im.feats=boardFeatures(c);im.fv=FEATURE_VERSION;await dbPut(im)}catch(e){console.warn(e)}
+    n++;$('bar').style.width=(n/old.length*100)+'%';$('status').textContent=`特徵更新中 ${n}/${old.length}`;if(n%5===0)await new Promise(r=>setTimeout(r,0))}
+  let lost=0;protos=protos.map(p=>{if(p.fv===FEATURE_VERSION)return p;const im=images.find(x=>x.id===p.src);if(!im){lost++;return null}return {...p,f:im.feats[p.i],fv:FEATURE_VERSION}}).filter(Boolean);
+  localStorage.setItem('protos',JSON.stringify(protos));if(lost)alert(`有 ${lost} 個原型找不到來源圖，已移除，請重新標記。`)}
 // ---------- init
-(async()=>{markLab();renderBoard();await openDb();images=await dbAll();reclassAll();fillSamples();saveProtos();$('status').textContent=`圖庫共 ${images.length} 張`})();
+(async()=>{markLab();renderBoard();await openDb();images=await dbAll();await migrate();reclassAll();fillSamples();saveProtos();$('status').textContent=`圖庫共 ${images.length} 張`})();
 </script></body></html>
