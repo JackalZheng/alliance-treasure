@@ -4,102 +4,254 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
 body{background:#1e1033;color:#eee}
-.g10{display:grid;grid-template-columns:repeat(10,1fr);gap:2px}
-.cell{aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;user-select:none}
-#board .cell{background:#3a1f6b;cursor:pointer;font-size:clamp(14px,4vw,22px)}
-#board .cell.k{background:#6b4fa8}
-.mini{display:grid;grid-template-columns:repeat(10,1fr);gap:1px;width:100%}
-.mini i{aspect-ratio:1;display:block;border-radius:1px}
-.cand{cursor:pointer;border:2px solid transparent;border-radius:6px;padding:2px;background:#2a1748}
-.cand.sel{border-color:#facc15}
-.btn{background:#7c3aed;padding:.35rem .7rem;border-radius:.4rem;font-size:.85rem;cursor:pointer}
-.btn2{background:#4b5563;padding:.35rem .7rem;border-radius:.4rem;font-size:.85rem;cursor:pointer}
+.grid10{display:grid;grid-template-columns:repeat(10,1fr);gap:2px}
+.cell{aspect-ratio:1;background:#3a1f6b;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:clamp(12px,3.5vw,20px);cursor:pointer;user-select:none}
+.cell.k{background:#6b4fa8}
+.thumb{cursor:pointer;border:2px solid transparent;border-radius:6px}
+.thumb.sel{border-color:#facc15}
+.btn{background:#7c3aed;padding:.35rem .7rem;border-radius:.4rem;font-size:.85rem}
+.btn2{background:#4b5563;padding:.35rem .7rem;border-radius:.4rem;font-size:.85rem}
 #pop{position:fixed;z-index:50;background:#2d1b4e;border:1px solid #a78bfa;border-radius:8px;padding:6px;display:none;grid-template-columns:repeat(3,auto);gap:4px}
 #pop button{padding:4px 8px;background:#4c1d95;border-radius:5px;font-size:14px}
-.panel{background:#2a1748;border-radius:10px;padding:10px;margin-bottom:10px}
 canvas{max-width:100%}
+.panel{background:#2a1748;border-radius:10px;padding:10px;margin-bottom:10px}
 </style></head><body class="p-2 md:p-4">
 <h1 class="text-xl font-bold mb-2">🎃 聯盟寶藏 輔助查詢</h1>
 <div class="md:flex md:gap-4">
 <div class="md:w-1/2">
  <div class="panel">
-  <h2 class="font-bold">① 目前盤面（點格子設定已翻開的圖案）</h2>
-  <p class="text-xs text-gray-300">只看到圖案的一部分也算該圖案；「空白」= 翻開後沒有東西。</p>
-  <div id="board" class="g10 my-2"></div>
-  <div class="flex flex-wrap gap-2 items-center text-sm">
-   <button class="btn2" id="clearBoard">清除盤面</button>
-   <label><input type="checkbox" id="hideFlag"> 隱藏不完整/可疑的解答圖</label>
+  <h2 class="font-bold">① 圖庫匯入</h2>
+  <div class="flex flex-wrap gap-2 my-2 text-sm">
+   <label class="btn cursor-pointer">選擇圖片<input id="files" type="file" multiple accept="image/*" class="hidden"></label>
+   <label class="btn cursor-pointer">選擇資料夾<input id="folder" type="file" webkitdirectory multiple class="hidden"></label>
+   <button class="btn2" id="clearDb">清除圖庫</button>
   </div>
-  <div class="text-xs mt-2" id="legend"></div>
+  <div class="w-full bg-gray-700 h-3 rounded"><div id="bar" class="bg-yellow-400 h-3 rounded" style="width:0"></div></div>
+  <div id="status" class="text-sm mt-1">載入中…</div>
+  <div id="bgBox" class="text-xs mt-2 p-1 rounded" style="background:#0003">底色：<span id="bgMode"></span>
+    <button class="btn2" data-pre="purple">紫</button><button class="btn2" data-pre="brown">褐</button><button class="btn2" data-pre="green">綠棋盤</button>
+    <input type="color" id="bgPick" value="#391776" style="width:28px;height:20px;vertical-align:middle"> <button class="btn2" id="bgAdd">加入</button>
+    <button class="btn2" id="bgEye">🎯 點樣本圖取色</button> <button class="btn2" id="bgAuto">自動</button> <button class="btn2" id="bgApply">套用並重算</button>
+    <span id="bgSw"></span></div>
  </div>
  <div class="panel">
-  <h2 class="font-bold">② 本機圖片（選用）</h2>
-  <p class="text-xs text-gray-300">選擇「寶藏地圖（全開）」資料夾，即可在預覽中看到原圖（依檔名對應，只在你的瀏覽器中讀取，不會上傳）。</p>
-  <div class="flex flex-wrap gap-2 my-2">
-   <label class="btn">選擇資料夾<input id="folder" type="file" webkitdirectory multiple class="hidden"></label>
-   <label class="btn2">選擇圖片<input id="files" type="file" multiple accept="image/*" class="hidden"></label>
+  <h2 class="font-bold">② 目前盤面（點格子設定圖案）</h2>
+  <p class="text-xs text-gray-300">代號表示「這一格屬於哪種圖案」，只看到圖案的一部分也算。</p>
+  <div id="board" class="grid10 my-2"></div>
+  <div class="flex flex-wrap gap-2 text-sm">
+   <button class="btn2" id="clearBoard">清除盤面</button>
+   <label class="btn cursor-pointer">上傳目前盤面截圖自動判讀<input id="cur" type="file" accept="image/*" class="hidden"></label>
   </div>
-  <div id="status" class="text-sm">載入解答資料中…</div>
  </div>
+ <details class="panel"><summary class="font-bold cursor-pointer">⚙️ 校正與標記（第一次使用請做）</summary>
+  <p class="text-xs my-1">1. 調整格線位置（比例），使格線對齊盤面。2. 選代號後點樣本圖上的格子加入「原型」，每種圖案標幾格（含各種部位），空白格可自動判斷。截圖中的南瓜格可標成 ?。</p>
+  <div class="text-xs mb-1">圖片尺寸群組：<select id="sizeSel" class="text-black"></select> <button class="btn2" id="calFile">用原圖檢查格線</button> <span class="text-gray-300">（改校正後需清除並重新匯入該尺寸的圖）</span></div>
+  <div class="grid grid-cols-2 gap-1 text-xs">
+   <label>左 <input id="cx0" type="number" step="0.001" class="text-black w-20"></label>
+   <label>右 <input id="cx1" type="number" step="0.001" class="text-black w-20"></label>
+   <label>上 <input id="cy0" type="number" step="0.001" class="text-black w-20"></label>
+   <label>下 <input id="cy1" type="number" step="0.001" class="text-black w-20"></label>
+  </div>
+  <div class="flex flex-wrap gap-1 my-2 text-sm" id="labCodes"></div>
+  <div class="text-xs mb-1">樣本圖：<select id="sampleSel" class="text-black max-w-[60%]"></select> <button class="btn2" id="undoProto">復原上一個</button> <label><input type="checkbox" id="showMask"> 顯示底色遮罩</label></div>
+  <canvas id="calib"></canvas>
+  <div id="protoInfo" class="text-xs my-1"></div>
+  <div class="flex flex-wrap gap-2 text-sm">
+   <button class="btn2" id="expP">匯出校正/原型 JSON</button>
+   <label class="btn2 cursor-pointer">匯入 JSON<input id="impP" type="file" accept=".json" class="hidden"></label>
+   <button class="btn2" id="expG">匯出全部代號格 JSON</button>
+   <button class="btn2" id="resetP">清除原型</button>
+  </div>
+ </details>
 </div>
 <div class="md:w-1/2">
  <div class="panel">
   <h2 class="font-bold">③ 符合的候選解答：<span id="cnt">0</span></h2>
-  <div id="cands" class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-4 gap-1 max-h-80 overflow-auto mt-2"></div>
+  <div id="cands" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-5 gap-1 max-h-72 overflow-auto mt-2"></div>
  </div>
  <div class="panel">
-  <h2 class="font-bold">④ 預覽與對照</h2>
-  <div id="pvName" class="text-xs mb-1">點選上方候選圖</div>
-  <div id="pvGrid" class="g10"></div>
-  <div class="text-xs my-2" id="pvImgCtl" style="display:none">原圖疊加透明度 <input id="op" type="range" min="0" max="1" step="0.1" value="0.9"></div>
+  <h2 class="font-bold">④ 預覽與對照 <label class="text-sm font-normal ml-2">疊加透明度 <input id="op" type="range" min="0" max="1" step="0.1" value="0.8"></label></h2>
+  <div id="pvName" class="text-xs"></div>
   <canvas id="pv"></canvas>
+  <div id="pvGrid" class="grid10 mt-2 text-xs"></div>
  </div>
 </div></div>
 <div id="pop"></div>
 <script>
-const CODES=[['?','❔','未翻開','#3a1f6b'],['E','⬛','空白','#1b1030'],['A','🔱','箭矢','#facc15'],['K','🗝️','鑰匙','#cbd5e1'],['C','🧰','寶箱','#b45309'],['W','👑','皇冠','#f97316'],['G','🎲','齒輪骰子','#9ca3af'],['H','⚓','錨','#38bdf8'],['B','🏹','弓','#7c2d12']];
-const ICON={},COL={},NAME={};CODES.forEach(c=>{ICON[c[0]]=c[1];NAME[c[0]]=c[2];COL[c[0]]=c[3]});
+const CODES=[['?','❔','未翻開'],['E','⬛','空白'],['A','🔱','箭矢'],['K','🗝️','鑰匙'],['C','🧰','寶箱'],['W','👑','皇冠'],['G','🎲','齒輪骰子'],['H','⚓','錨'],['B','🏹','弓']];
+const ICON=Object.fromEntries(CODES.map(c=>[c[0],c[1]]));
+const COLS=10,ROWS=12;
+const DEF={x0:0.0507,x1:0.9516,y0:0.2810,y1:0.7805};
+let calMap=JSON.parse(localStorage.getItem('calMap')||'null')||{};{const o=JSON.parse(localStorage.getItem('cal')||'null');if(o&&!calMap['868x1886'])calMap['868x1886']=o}
+let calSize='868x1886';let cal=calMap[calSize]||{...DEF};
+function calFor(W,H){return calMap[W+'x'+H]||calMap['*']||DEF}
+function saveCal(){calMap[calSize]={...cal};localStorage.setItem('calMap',JSON.stringify(calMap))}
+let protos=JSON.parse(localStorage.getItem('protos')||'[]'); // {c,f}
+let images=[]; // {id,name,thumb,feats:Float32Array[120*FD] as array}
+let board=JSON.parse(localStorage.getItem('board')||'null')||Array(120).fill('?');
+let labCode='A',sel=null;
 const $=id=>document.getElementById(id);
-let DATA={codes:{},flags:{},grids:{}},LIST=[],sel=null;const local={};
-let board=JSON.parse(localStorage.getItem('board2')||'null')||Array(120).fill('?');
-$('legend').innerHTML=CODES.map(c=>`<span class="mr-2 whitespace-nowrap"><i style="display:inline-block;width:10px;height:10px;background:${c[3]}"></i> ${c[1]}${c[2]}</span>`).join('');
-// filter (pure, also used by tests)
-function matches(code,b){for(let i=0;i<120;i++){const c=b[i];if(c!=='?'&&code[i]!=='?'&&code[i]!==c)return false}return true}
-function filter(){const hide=$('hideFlag').checked;
-  const res=LIST.filter(f=>(!hide||!DATA.flags[f])&&matches(DATA.codes[f],board));
-  $('cnt').textContent=`${res.length} / ${LIST.length}`;
-  $('cands').innerHTML=res.slice(0,200).map(f=>`<div class="cand ${sel===f?'sel':''}" data-f="${f}">${mini(DATA.codes[f])}<div class="text-[10px] truncate">${DATA.flags[f]?'⚠️':''}${f.replace(/\.\w+$/,'')}</div></div>`).join('')+(res.length>200?'<div class="text-xs">僅顯示前200張，請再多標幾格</div>':'');
-  if(res.length===1&&sel!==res[0]){sel=res[0];preview()}}
-function mini(code){return '<div class="mini">'+[...code].map(c=>`<i style="background:${COL[c]}"></i>`).join('')+'</div>'}
-$('cands').onclick=e=>{const el=e.target.closest('.cand');if(!el)return;sel=el.dataset.f;preview();filter()};
-$('hideFlag').onchange=filter;
-// board
+// ---------- IndexedDB
+let db;function openDb(){return new Promise((r,j)=>{const q=indexedDB.open('treasure',1);q.onupgradeneeded=()=>q.result.createObjectStore('img',{keyPath:'id'});q.onsuccess=()=>{db=q.result;r()};q.onerror=j})}
+function tx(m){return db.transaction('img',m).objectStore('img')}
+function dbAll(){return new Promise(r=>{const q=tx('readonly').getAll();q.onsuccess=()=>r(q.result)})}
+function dbPut(o){return new Promise(r=>{const q=tx('readwrite').put(o);q.onsuccess=r;q.onerror=r})}
+// ---------- features
+let userBg=JSON.parse(localStorage.getItem('userBg')||'[]');
+const BG_PRE={purple:[[57,23,118]],brown:[[128,56,35],[150,70,40]],green:[[52,92,40],[70,112,52]]};
+function bgKey(){return userBg.length?userBg.map(c=>c.map(Math.round).join(',')).join(';'):'auto'}
+let FEATURE_VERSION='3|'+bgKey();const FG_MIN=0.06;
+// theme-agnostic background: dominant coarse colour bins of the board crop (covers checkerboard shades + grid lines)
+function bgColor(d){return userBg.length?userBg.map(c=>[...c]):autoBg(d)}
+function autoBg(d){const h=new Map();let tot=0;
+  for(let i=0;i<d.length;i+=8){const k=(d[i]>>4)<<8|(d[i+1]>>4)<<4|(d[i+2]>>4);let e=h.get(k);if(!e){e=[0,0,0,0];h.set(k,e)}e[0]++;e[1]+=d[i];e[2]+=d[i+1];e[3]+=d[i+2];tot++}
+  const top=[...h.values()].sort((a,b)=>b[0]-a[0]);const cs=[];
+  for(const e of top.slice(0,6)){if(e[0]<tot*0.03)break;const c=[e[1]/e[0],e[2]/e[0],e[3]/e[0]];
+    if(!cs.some(o=>cd2(o,c)<24*24))cs.push(c);if(cs.length>=3)break}
+  if(!cs.length)cs.push([57,23,118]);return cs}
+function cd2(a,b){const x=a[0]-b[0],y=a[1]-b[1],z=a[2]-b[2];return x*x+y*y+z*z}
+function bgThr(c){const mx=Math.max(...c),mn=Math.min(...c);// brown/orange theme -> tighter (chest & bow wood are brown)
+  return (c[0]>=c[1]&&c[1]>=c[2]&&mx-mn>40)?26:40}
+// local shades from a cell's border ring (only pixels already near a global centre)
+function localCenters(d,W,x0,y0,x1,y1,cs){const acc=cs.map(()=>[0,0,0,0]);
+  for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){if(y>y0+2&&y<y1-3&&x>x0+2&&x<x1-3)continue;const i=(y*W+x)*4,p=[d[i],d[i+1],d[i+2]];
+    cs.forEach((c,j)=>{if(cd2(p,c)<(bgThr(c)*1.3)**2){acc[j][0]++;acc[j][1]+=p[0];acc[j][2]+=p[1];acc[j][3]+=p[2]}})}
+  return cs.map((c,j)=>acc[j][0]>8?[acc[j][1]/acc[j][0],acc[j][2]/acc[j][0],acc[j][3]/acc[j][0]]:c)}
+function flatAt(d,W,H,x,y){const i=(y*W+x)*4,j=(y*W+Math.min(W-1,x+2))*4,k=(Math.min(H-1,y+2)*W+x)*4;
+  return Math.abs(d[i]-d[j])+Math.abs(d[i+1]-d[j+1])+Math.abs(d[i+2]-d[j+2])+Math.abs(d[i]-d[k])+Math.abs(d[i+1]-d[k+1])+Math.abs(d[i+2]-d[k+2])<60}
+function isBg(r,g,b,cs){for(const c of cs){const t=bgThr(c);if(cd2([r,g,b],c)<t*t)return true}return false}
+function hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
+  if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;if(h<0)h+=360}return [h,mx?d/mx:0,mx]}
+function boardFeatures(cv){const W=cv.width,H=cv.height,d=cv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,W,H).data;
+  const gc=bgColor(d),cw=W/COLS,ch=H/ROWS,out=[];
+  for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const x0=Math.round(k*cw+cw*.1),x1=Math.round((k+1)*cw-cw*.1),y0=Math.round(r*ch+ch*.1),y1=Math.round((r+1)*ch-ch*.1);
+    const lc=localCenters(d,W,Math.round(k*cw),Math.round(r*ch),Math.round((k+1)*cw),Math.round((r+1)*ch),gc),bg=[...lc,...gc];let n=0,fg=0,s=[0,0,0],s2=[0,0,0];const hh=new Array(12).fill(0),vh=new Array(6).fill(0),sh=new Array(16).fill(0),shn=new Array(16).fill(0);
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=(y*W+x)*4,R=d[i],G=d[i+1],B=d[i+2];n++;
+      const q=Math.min(3,Math.floor((y-y0)/(y1-y0)*4))*4+Math.min(3,Math.floor((x-x0)/(x1-x0)*4));shn[q]++;
+      if(isBg(R,G,B,bg)&&flatAt(d,W,H,x,y))continue;fg++;sh[q]++;s[0]+=R;s[1]+=G;s[2]+=B;s2[0]+=R*R;s2[1]+=G*G;s2[2]+=B*B;
+      const [h,sat,v]=hsv(R,G,B);if(sat<0.18)hh[11]++;else hh[Math.min(10,Math.floor(h/360*11))]++;vh[Math.min(5,Math.floor(v*6))]++}
+    const f={ratio:fg/n,mean:[0,0,0],std:[0,0,0],hue:hh,val:vh,shape:sh.map((v,i)=>v/(shn[i]||1))};
+    if(fg){for(let c=0;c<3;c++){const m=s[c]/fg;f.mean[c]=m/255;f.std[c]=Math.sqrt(Math.max(0,s2[c]/fg-m*m))/255}
+      f.hue=hh.map(v=>v/fg);f.val=vh.map(v=>v/fg)}
+    out.push([f.ratio,...f.mean,...f.std,...f.hue,...f.val,...f.shape].map(v=>Math.round(v*1000)/1000))}
+  return out}
+// vector layout: 0 ratio |1-3 mean |4-6 std |7-18 hue |19-24 val |25-40 shape
+const WTS=[2,...Array(3).fill(2),...Array(3).fill(1),...Array(12).fill(1.5),...Array(6).fill(1),...Array(16).fill(0.6)];
+function heur(f){return f[0]<FG_MIN?'E':null}
+function dist(a,b){let s=0;for(let i=0;i<a.length;i++){const d=a[i]-b[i];s+=WTS[i]*d*d}return s}
+function classify(f){const h=heur(f);if(!protos.length)return h||'?';
+  let best=[];for(const p of protos){const d=dist(f,p.f);best.push([d,p.c])}best.sort((a,b)=>a[0]-b[0]);
+  if(h)return 'E';
+  const k=best.slice(0,3),v={};k.forEach(([d,c],i)=>v[c]=(v[c]||0)+1/(1+d)*(i?1:1.5));
+  return Object.entries(v).sort((a,b)=>b[1]-a[1])[0][0]}
+function reclassAll(){for(const im of images)im.codes=im.feats.map(classify);filter();if(sel)preview(sel)}
+// ---------- import
+function loadImg(file){return new Promise((r,j)=>{const u=URL.createObjectURL(file),i=new Image();i.onload=()=>{r(i);URL.revokeObjectURL(u)};i.onerror=j;i.src=u})}
+function imgCtx(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0);return x}
+function cropCanvas(ctx,W,H,w){const cal=calFor(W,H),c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d',{willReadFrequently:true}).drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c}
+function makeThumb(ctx,W,H,w){const cal=calFor(W,H),c=document.createElement('canvas'),sw=(cal.x1-cal.x0)*W,sh=(cal.y1-cal.y0)*H;c.width=w;c.height=Math.round(w*sh/sw);c.getContext('2d').drawImage(ctx.canvas,cal.x0*W,cal.y0*H,sw,sh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.7)}
+async function importFiles(list){const fs=[...list].filter(f=>/^image\//.test(f.type)||/\.(jpe?g|png|webp)$/i.test(f.name));
+  let n=0;for(const f of fs){const id=f.name+'_'+f.size;if(images.find(x=>x.id===id)){n++;continue}
+    try{const img=await loadImg(f);const ctx=imgCtx(img),W=img.naturalWidth,H=img.naturalHeight;
+      if(!sizes.has(W+'x'+H)){sizes.add(W+'x'+H);fillSizes()}const o={id,name:f.name,size:W+'x'+H,thumb:makeThumb(ctx,W,H,120),big:makeThumb(ctx,W,H,400),fv:FEATURE_VERSION,feats:boardFeatures(cropCanvas(ctx,W,H,400))};
+      await dbPut(o);o.codes=o.feats.map(classify);images.push(o)}catch(e){console.warn(e)}
+    n++;$('bar').style.width=(n/fs.length*100)+'%';$('status').textContent=`處理中 ${n}/${fs.length}`;
+    if(n%5===0)await new Promise(r=>setTimeout(r,0))}
+  $('status').textContent=`圖庫共 ${images.length} 張`;fillSamples();filter()}
+$('files').onchange=e=>importFiles(e.target.files);$('folder').onchange=e=>importFiles(e.target.files);
+$('clearDb').onclick=async()=>{if(!confirm('確定清除圖庫？'))return;tx('readwrite').clear();images=[];sel=null;$('status').textContent='圖庫共 0 張';fillSamples();filter()};
+// ---------- board
 const pop=$('pop');let popIdx=-1;
 pop.innerHTML=CODES.map(c=>`<button data-c="${c[0]}">${c[1]} ${c[2]}</button>`).join('');
-pop.onclick=e=>{const c=e.target.closest('button')?.dataset.c;if(c&&popIdx>=0){board[popIdx]=c;save()}pop.style.display='none'};
-document.addEventListener('click',e=>{if(!pop.contains(e.target)&&!e.target.closest('#board'))pop.style.display='none'});
-function renderBoard(){$('board').innerHTML=board.map((c,i)=>`<div class="cell ${c!=='?'?'k':''}" data-i="${i}">${c==='?'?'':ICON[c]}</div>`).join('')}
-$('board').onclick=e=>{const el=e.target.closest('.cell');if(!el)return;popIdx=+el.dataset.i;const r=el.getBoundingClientRect();pop.style.display='grid';
-  pop.style.left=Math.max(4,Math.min(r.left,innerWidth-250))+'px';pop.style.top=Math.min(r.bottom+4,innerHeight-140)+'px'};
-function save(){localStorage.setItem('board2',JSON.stringify(board));renderBoard();filter();if(sel)preview()}
-$('clearBoard').onclick=()=>{board=Array(120).fill('?');save()};
-// preview
-function preview(){const code=DATA.codes[sel];if(!code)return;
-  $('pvName').innerHTML=`${sel}${DATA.flags[sel]?' <span class="text-yellow-300">⚠️ '+DATA.flags[sel].join('、')+'</span>':''}`;
-  $('pvGrid').innerHTML=[...code].map((c,k)=>{const b=board[k];const st=b==='?'?'':(b===c?'outline:3px solid #22c55e;outline-offset:-3px':'outline:3px solid #ef4444;outline-offset:-3px');
-    return `<div class="cell" style="background:${COL[c]}55;font-size:clamp(12px,3.5vw,20px);${st}" title="${NAME[c]}">${c==='E'?'':ICON[c]}</div>`}).join('');
-  const file=local[sel],cv=$('pv');if(!file||!DATA.grids[sel]){cv.width=0;$('pvImgCtl').style.display='none';return}
-  $('pvImgCtl').style.display='';const u=URL.createObjectURL(file),img=new Image();img.onload=()=>{const [x,y,s]=DATA.grids[sel];
-    const sc=Math.min(1,500/(10*s));cv.width=Math.round(10*s*sc);cv.height=Math.round(12*s*sc);const g=cv.getContext('2d');
-    g.drawImage(img,x,y,10*s,12*s,0,0,cv.width,cv.height);const cs=s*sc;g.globalAlpha=+$('op').value;g.lineWidth=3;
-    board.forEach((b,k)=>{if(b==='?')return;g.strokeStyle=code[k]===b?'#22c55e':'#ef4444';g.strokeRect(k%10*cs+2,Math.floor(k/10)*cs+2,cs-4,cs-4)});g.globalAlpha=1;URL.revokeObjectURL(u)};img.src=u}
-$('op').oninput=preview;
-function addLocal(list){let n=0;for(const f of list){if(DATA.codes[f.name]){local[f.name]=f;n++}}$('status').textContent=`解答圖 ${LIST.length} 張；本機已對應原圖 ${Object.keys(local).length} 張`;if(sel)preview()}
-$('folder').onchange=e=>addLocal(e.target.files);$('files').onchange=e=>addLocal(e.target.files);
-// init
-renderBoard();
-fetch('codes.json').then(r=>r.json()).then(j=>{DATA=j;DATA.flags=j.flags||{};DATA.grids=j.grids||{};LIST=Object.keys(j.codes).sort();
-  $('status').textContent=`解答圖 ${LIST.length} 張（其中 ${Object.keys(DATA.flags).length} 張標示 ⚠️ 不完整或可疑）`;filter()})
- .catch(e=>{$('status').textContent='無法載入 codes.json：'+e});
-if(typeof module!=='undefined')module.exports={matches};
+pop.onclick=e=>{const c=e.target.closest('button')?.dataset.c;if(c&&popIdx>=0){board[popIdx]=c;saveBoard()}pop.style.display='none'};
+document.addEventListener('click',e=>{if(!pop.contains(e.target)&&!e.target.classList.contains('bc'))pop.style.display='none'});
+function renderBoard(){$('board').innerHTML=board.map((c,i)=>`<div class="cell bc ${c!=='?'?'k':''}" data-i="${i}">${c==='?'?'':ICON[c]}</div>`).join('')}
+$('board').onclick=e=>{const el=e.target.closest('.bc');if(!el)return;popIdx=+el.dataset.i;const r=el.getBoundingClientRect();pop.style.display='grid';
+  pop.style.left=Math.min(r.left,innerWidth-240)+'px';pop.style.top=Math.min(r.bottom+4,innerHeight-130)+'px'};
+function saveBoard(){localStorage.setItem('board',JSON.stringify(board));renderBoard();filter();if(sel)preview(sel)}
+$('clearBoard').onclick=()=>{board=Array(120).fill('?');saveBoard()};
+$('cur').onchange=async e=>{const f=e.target.files[0];if(!f)return;const img=await loadImg(f),ctx=imgCtx(img);
+  const fe=boardFeatures(cropCanvas(ctx,img.naturalWidth,img.naturalHeight,400));
+  board=fe.map(f=>{
+    const c=classify(f);if(protos.some(p=>p.c==='?'))return c;
+    // 南瓜格：前景多（淺紫磚）且含橘色
+    if(f[0]>0.6&&(f[7]+f[8])>0.08)return '?';return c});
+  saveBoard();e.target.value=''};
+// ---------- filter / preview
+function filter(){const known=board.map((c,i)=>[c,i]).filter(x=>x[0]!=='?');
+  const res=images.filter(im=>known.every(([c,i])=>im.codes[i]===c));$('cnt').textContent=`${res.length} / ${images.length}`;
+  $('cands').innerHTML=res.slice(0,300).map(im=>`<img class="thumb ${sel===im?'sel':''}" data-id="${im.id}" src="${im.thumb}" title="${im.name}">`).join('')+(res.length>300?'<div class="text-xs">僅顯示前300張</div>':'')}
+$('cands').onclick=e=>{const id=e.target.dataset?.id;if(!id)return;sel=images.find(x=>x.id===id);preview(sel);filter()};
+$('op').oninput=()=>sel&&preview(sel);
+function preview(im){const c=$('pv'),x=c.getContext('2d'),i=new Image();i.onload=()=>{c.width=i.width;c.height=i.height;x.drawImage(i,0,0);
+  const cw=c.width/COLS,ch=c.height/ROWS;x.globalAlpha=+$('op').value;x.lineWidth=3;
+  board.forEach((b,k)=>{if(b==='?')return;const ok=im.codes[k]===b;x.strokeStyle=ok?'#22c55e':'#ef4444';x.strokeRect(k%COLS*cw+2,Math.floor(k/COLS)*ch+2,cw-4,ch-4)});x.globalAlpha=1};i.src=im.big;
+  $('pvName').textContent=im.name;$('pvGrid').innerHTML=im.codes.map((c,k)=>`<div class="cell" style="font-size:11px;${board[k]!=='?'?(board[k]===c?'outline:2px solid #22c55e':'outline:2px solid #ef4444'):''}">${ICON[c]}</div>`).join('')}
+// ---------- calibration
+['x0','x1','y0','y1'].forEach(k=>{const el=$('c'+k);el.value=cal[k];el.oninput=()=>{cal[k]=+el.value;saveCal();drawCalib()}});
+$('labCodes').innerHTML=CODES.map(c=>`<button class="btn2" data-c="${c[0]}">${c[1]}${c[2]}</button>`).join('');
+$('labCodes').onclick=e=>{const c=e.target.closest('button')?.dataset.c;if(c){labCode=c;markLab()}};
+function markLab(){[...$('labCodes').children].forEach(b=>b.style.background=b.dataset.c===labCode?'#7c3aed':'')}
+let sampleFile=null,sampleCtx=null;
+function fillSamples(){$('sampleSel').innerHTML='<option value="">（請先匯入圖片）</option>'+images.slice(0,600).map(im=>`<option value="${im.id}">${im.name}</option>`).join('')}
+// sample uses full-res original? we only store crops; let user pick original file for calibration
+$('sampleSel').onchange=()=>drawCalib();$('showMask').onchange=()=>drawCalib();
+const pick=document.createElement('input');pick.type='file';pick.accept='image/*';
+async function drawCalib(){const c=$('calib'),x=c.getContext('2d');const id=$('sampleSel').value;
+  if(sampleCtx&&!id){}
+  let src=sampleCtx?sampleCtx.canvas:null;
+  if(id){const im=images.find(z=>z.id===id);const i=new Image();await new Promise(r=>{i.onload=r;i.src=im.big});
+    c.width=i.width;c.height=i.height;x.drawImage(i,0,0);c._mode='crop';c._im=im;
+    if($('showMask').checked){const id2=x.getImageData(0,0,c.width,c.height),d=id2.data,W=c.width,H=c.height,gc=bgColor(d),cw=W/COLS,ch=H/ROWS,m=new Uint8Array(W*H);
+      for(let r=0;r<ROWS;r++)for(let k=0;k<COLS;k++){const X0=Math.round(k*cw),Y0=Math.round(r*ch),X1=Math.round((k+1)*cw),Y1=Math.round((r+1)*ch),bg=[...localCenters(d,W,X0,Y0,X1,Y1,gc),...gc];
+        for(let y=Y0;y<Y1;y++)for(let xx=X0;xx<X1;xx++){const p=(y*W+xx)*4;if(isBg(d[p],d[p+1],d[p+2],bg)&&flatAt(d,W,H,xx,y))m[y*W+xx]=1}}
+      for(let q=0;q<m.length;q++)if(m[q]){d[q*4]=0;d[q*4+1]=255;d[q*4+2]=255}x.putImageData(id2,0,0)}}
+  else if(src){c.width=400;c.height=src.height*400/src.width;x.drawImage(src,0,0,c.width,c.height);c._mode='full'}
+  else{c.width=0;return}
+  x.strokeStyle='#0f0';x.lineWidth=1;let X0=0,Y0=0,X1=c.width,Y1=c.height;
+  if(c._mode==='full'){X0=cal.x0*c.width;X1=cal.x1*c.width;Y0=cal.y0*c.height;Y1=cal.y1*c.height}
+  for(let k=0;k<=COLS;k++){const xx=X0+(X1-X0)*k/COLS;x.beginPath();x.moveTo(xx,Y0);x.lineTo(xx,Y1);x.stroke()}
+  for(let r=0;r<=ROWS;r++){const yy=Y0+(Y1-Y0)*r/ROWS;x.beginPath();x.moveTo(X0,yy);x.lineTo(X1,yy);x.stroke()}
+  if(c._mode==='crop'){x.font='14px sans-serif';const cw=c.width/COLS,ch=c.height/ROWS;c._im.codes.forEach((cd,k)=>{x.fillStyle='rgba(0,0,0,.55)';x.fillRect(k%COLS*cw,Math.floor(k/COLS)*ch,16,16);x.fillStyle='#fff';x.fillText(cd,k%COLS*cw+3,Math.floor(k/COLS)*ch+13)})}}
+$('calib').onclick=e=>{const c=$('calib');if(c._pick){const r=c.getBoundingClientRect(),X=Math.floor((e.clientX-r.left)*c.width/r.width),Y=Math.floor((e.clientY-r.top)*c.height/r.height),p=c.getContext('2d').getImageData(X,Y,1,1).data;userBg.push([p[0],p[1],p[2]]);c._pick=false;bgUI();return}if(c._mode!=='crop')return;const r=c.getBoundingClientRect();
+  const k=Math.floor((e.clientX-r.left)/r.width*COLS),rr=Math.floor((e.clientY-r.top)/r.height*ROWS);const i=rr*COLS+k;
+  protos.push({c:labCode,f:c._im.feats[i],src:c._im.id,i,fv:FEATURE_VERSION});saveProtos()};
+$('undoProto').onclick=()=>{protos.pop();saveProtos()};
+$('resetP').onclick=()=>{if(confirm('清除所有原型？')){protos=[];saveProtos()}};
+function saveProtos(){localStorage.setItem('protos',JSON.stringify(protos));const cnt={};protos.forEach(p=>cnt[p.c]=(cnt[p.c]||0)+1);
+  $('protoInfo').textContent='原型數：'+(CODES.map(c=>cnt[c[0]]?`${c[1]}${cnt[c[0]]}`:'').filter(Boolean).join(' ')||'0');reclassAll();drawCalib()}
+function dl(name,obj){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(obj)],{type:'application/json'}));a.download=name;a.click()}
+$('expP').onclick=()=>dl('treasure-protos.json',{cal,calMap,protos});
+$('expG').onclick=()=>dl('treasure-grids.json',images.map(im=>({name:im.name,grid:im.codes.join('')})));
+$('impP').onchange=async e=>{const o=JSON.parse(await e.target.files[0].text());if(o.calMap){calMap=o.calMap;localStorage.setItem('calMap',JSON.stringify(calMap))}if(o.cal){cal=o.cal;saveCal();['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k])}
+  if(o.protos)protos=o.protos;saveProtos();alert('已匯入。若校正值改變，請清除圖庫後重新匯入。')};
+const sizes=new Set(['868x1886']);
+function fillSizes(){images.forEach(im=>im.size&&sizes.add(im.size));Object.keys(calMap).forEach(k=>sizes.add(k));
+  $('sizeSel').innerHTML=[...sizes].map(z=>`<option ${z===calSize?'selected':''}>${z}</option>`).join('')}
+$('sizeSel').onchange=()=>{calSize=$('sizeSel').value;cal={...(calMap[calSize]||DEF)};['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k]);drawCalib()};
+$('calFile').onclick=()=>{pick.onchange=async()=>{const f=pick.files[0];if(!f)return;const img=await loadImg(f);sampleCtx=imgCtx(img);
+  calSize=img.naturalWidth+'x'+img.naturalHeight;sizes.add(calSize);cal={...calFor(img.naturalWidth,img.naturalHeight)};saveCal();fillSizes();['x0','x1','y0','y1'].forEach(k=>$('c'+k).value=cal[k]);$('sampleSel').value='';drawCalib()};pick.click()};
+// ---------- migrate old features
+function loadUrl(u){return new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=u})}
+async function migrate(){const old=images.filter(im=>im.fv!==FEATURE_VERSION);let n=0;
+  for(const im of old){try{const i=await loadUrl(im.big);const c=document.createElement('canvas');c.width=i.width;c.height=i.height;c.getContext('2d').drawImage(i,0,0);
+      im.feats=boardFeatures(c);im.fv=FEATURE_VERSION;await dbPut(im)}catch(e){console.warn(e)}
+    n++;$('bar').style.width=(n/old.length*100)+'%';$('status').textContent=`特徵更新中 ${n}/${old.length}`;if(n%5===0)await new Promise(r=>setTimeout(r,0))}
+  let lost=0;protos=protos.map(p=>{if(p.fv===FEATURE_VERSION)return p;const im=images.find(x=>x.id===p.src);if(!im){lost++;return null}return {...p,f:im.feats[p.i],fv:FEATURE_VERSION}}).filter(Boolean);
+  localStorage.setItem('protos',JSON.stringify(protos));if(lost)alert(`有 ${lost} 個原型找不到來源圖，已移除，請重新標記。`)}
+
+// ---------- user background colours
+function hex(c){return '#'+c.map(v=>Math.round(v).toString(16).padStart(2,'0')).join('')}
+function bgUI(){localStorage.setItem('userBg',JSON.stringify(userBg));$('bgMode').textContent=userBg.length?'自選':'自動判斷';
+  $('bgSw').innerHTML=userBg.map((c,i)=>`<span data-i="${i}" title="點一下移除" style="display:inline-block;width:16px;height:16px;border:1px solid #fff;vertical-align:middle;margin-left:2px;cursor:pointer;background:${hex(c)}"></span>`).join('');
+  $('bgEye').style.background=$('calib')._pick?'#7c3aed':'';const pend='3|'+bgKey()!==FEATURE_VERSION;$('bgApply').style.background=pend?'#ca8a04':''}
+document.querySelectorAll('[data-pre]').forEach(b=>b.onclick=()=>{userBg=BG_PRE[b.dataset.pre].map(c=>[...c]);bgUI()});
+$('bgAdd').onclick=()=>{const v=$('bgPick').value;userBg.push([1,3,5].map(i=>parseInt(v.slice(i,i+2),16)));bgUI()};
+$('bgSw').onclick=e=>{const i=e.target.dataset.i;if(i!=null){userBg.splice(+i,1);bgUI()}};
+$('bgAuto').onclick=()=>{userBg=[];bgUI()};
+$('bgEye').onclick=()=>{const c=$('calib');if(!$('sampleSel').value){if(images.length){$('sampleSel').value=images[0].id}else{alert('請先匯入圖片');return}}c._pick=!c._pick;c.closest('details').open=true;drawCalib();c.scrollIntoView();bgUI()};
+$('bgApply').onclick=async()=>{FEATURE_VERSION='3|'+bgKey();bgUI();await migrate();reclassAll();drawCalib();$('status').textContent=`圖庫共 ${images.length} 張（底色：${userBg.length?'自選':'自動'}）`};
+bgUI();
+// ---------- init
+(async()=>{markLab();renderBoard();await openDb();images=await dbAll();fillSizes();await migrate();reclassAll();fillSamples();saveProtos();$('status').textContent=`圖庫共 ${images.length} 張`})();
 </script></body></html>
