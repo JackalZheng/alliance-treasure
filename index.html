@@ -64,7 +64,7 @@ let DATA={codes:{},flags:{},grids:{}},LIST=[],sel=null;const local={};
 let board=JSON.parse(localStorage.getItem('board2')||'null')||Array(120).fill('?');
 $('legend').innerHTML=CODES.map(c=>`<span class="mr-2 whitespace-nowrap"><i style="display:inline-block;width:10px;height:10px;background:${c[3]}"></i> ${c[1]}${c[2]}</span>`).join('');
 // filter (pure, also used by tests)
-function matches(code,b){for(let i=0;i<120;i++){const c=b[i];if(c!=='?'&&code[i]!==c)return false}return true}
+function matches(code,b){for(let i=0;i<120;i++){const c=b[i];if(c!=='?'&&code[i]!=='?'&&code[i]!==c)return false}return true}
 function filter(){const hide=$('hideFlag').checked;
   const res=LIST.filter(f=>(!hide||!DATA.flags[f])&&matches(DATA.codes[f],board));
   $('cnt').textContent=`${res.length} / ${LIST.length}`;
